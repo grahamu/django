@@ -1,4 +1,4 @@
-from __future__ import unicode_literals
+from http import HTTPStatus
 
 from django.core.exceptions import SuspiciousOperation
 from django.db import connection, transaction
@@ -31,3 +31,7 @@ def suspicious(request):
 def malformed_post(request):
     request.POST
     return HttpResponse()
+
+
+def httpstatus_enum(request):
+    return HttpResponse(status=HTTPStatus.OK)

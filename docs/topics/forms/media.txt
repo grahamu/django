@@ -1,3 +1,4 @@
+=================================
 Form Assets (the ``Media`` class)
 =================================
 
@@ -42,7 +43,7 @@ in a form suitable for easy inclusion on your Web page.
 .. _assets-as-a-static-definition:
 
 Assets as a static definition
------------------------------
+=============================
 
 The easiest way to define assets is as a static definition. Using this
 method, the declaration is an inner ``Media`` class. The properties of the
@@ -70,14 +71,14 @@ can be retrieved through this property::
 
     >>> w = CalendarWidget()
     >>> print(w.media)
-    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/animations.js"></script>
     <script type="text/javascript" src="http://static.example.com/actions.js"></script>
 
 Here's a list of all possible ``Media`` options. There are no required options.
 
 ``css``
-~~~~~~~
+-------
 
 A dictionary describing the CSS files required for various forms of output
 media.
@@ -113,19 +114,19 @@ requirements::
 
 If this last CSS definition were to be rendered, it would become the following HTML::
 
-    <link href="http://static.example.com/pretty.css" type="text/css" media="screen" rel="stylesheet" />
-    <link href="http://static.example.com/lo_res.css" type="text/css" media="tv,projector" rel="stylesheet" />
-    <link href="http://static.example.com/newspaper.css" type="text/css" media="print" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="screen" rel="stylesheet">
+    <link href="http://static.example.com/lo_res.css" type="text/css" media="tv,projector" rel="stylesheet">
+    <link href="http://static.example.com/newspaper.css" type="text/css" media="print" rel="stylesheet">
 
 ``js``
-~~~~~~
+------
 
 A tuple describing the required JavaScript files. See :ref:`the
 section on paths <form-asset-paths>` for details of how to specify
 paths to these files.
 
 ``extend``
-~~~~~~~~~~
+----------
 
 A boolean defining inheritance behavior for ``Media`` declarations.
 
@@ -144,8 +145,8 @@ example above::
 
     >>> w = FancyCalendarWidget()
     >>> print(w.media)
-    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet" />
-    <link href="http://static.example.com/fancy.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet">
+    <link href="http://static.example.com/fancy.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/animations.js"></script>
     <script type="text/javascript" src="http://static.example.com/actions.js"></script>
     <script type="text/javascript" src="http://static.example.com/whizbang.js"></script>
@@ -164,7 +165,7 @@ an ``extend=False`` declaration to the ``Media`` declaration::
 
     >>> w = FancyCalendarWidget()
     >>> print(w.media)
-    <link href="http://static.example.com/fancy.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/fancy.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/whizbang.js"></script>
 
 If you require even more control over inheritance, define your assets using a
@@ -174,7 +175,7 @@ complete control over which files are inherited, and which are not.
 .. _dynamic-property:
 
 ``Media`` as a dynamic property
--------------------------------
+===============================
 
 If you need to perform some more sophisticated manipulation of asset
 requirements, you can define the ``media`` property directly. This is
@@ -187,10 +188,10 @@ For example, the static definition for our Calendar Widget could also
 be defined in a dynamic fashion::
 
     class CalendarWidget(forms.TextInput):
-        def _media(self):
+        @property
+        def media(self):
             return forms.Media(css={'all': ('pretty.css',)},
                                js=('animations.js', 'actions.js'))
-        media = property(_media)
 
 See the section on `Media objects`_ for more details on how to construct
 return values for dynamic ``media`` properties.
@@ -198,17 +199,18 @@ return values for dynamic ``media`` properties.
 .. _form-asset-paths:
 
 Paths in asset definitions
---------------------------
+==========================
 
 Paths used to specify assets can be either relative or absolute. If a
 path starts with ``/``, ``http://`` or ``https://``, it will be
 interpreted as an absolute path, and left as-is. All other paths will
-be prepended with the value of the appropriate prefix.
+be prepended with the value of the appropriate prefix. If the
+:mod:`django.contrib.staticfiles` app is installed, it will be used to serve
+assets.
 
-As part of the introduction of the
-:doc:`staticfiles app </ref/contrib/staticfiles>` two new settings were added
-to refer to "static files" (images, CSS, JavaScript, etc.) that are needed
-to render a complete web page: :setting:`STATIC_URL` and :setting:`STATIC_ROOT`.
+Whether or not you use :mod:`django.contrib.staticfiles`,  the
+:setting:`STATIC_URL` and :setting:`STATIC_ROOT` settings are required to
+render a complete web page.
 
 To find the appropriate prefix to use, Django will check if the
 :setting:`STATIC_URL` setting is not ``None`` and automatically fall back
@@ -226,7 +228,7 @@ was ``None``::
 
     >>> w = CalendarWidget()
     >>> print(w.media)
-    <link href="/css/pretty.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="/css/pretty.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://uploads.example.com/animations.js"></script>
     <script type="text/javascript" src="http://othersite.com/actions.js"></script>
 
@@ -234,13 +236,21 @@ But if :setting:`STATIC_URL` is ``'http://static.example.com/'``::
 
     >>> w = CalendarWidget()
     >>> print(w.media)
-    <link href="/css/pretty.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="/css/pretty.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/animations.js"></script>
     <script type="text/javascript" src="http://othersite.com/actions.js"></script>
 
+Or if :mod:`~django.contrib.staticfiles` is configured using the
+:class:`~django.contrib.staticfiles.storage.ManifestStaticFilesStorage`::
+
+    >>> w = CalendarWidget()
+    >>> print(w.media)
+    <link href="/css/pretty.css" type="text/css" media="all" rel="stylesheet">
+    <script type="text/javascript" src="https://static.example.com/animations.27e20196a850.js"></script>
+    <script type="text/javascript" src="http://othersite.com/actions.js"></script>
 
 ``Media`` objects
------------------
+=================
 
 When you interrogate the ``media`` attribute of a widget or form, the
 value that is returned is a ``forms.Media`` object. As we have already
@@ -251,25 +261,25 @@ HTML page.
 However, ``Media`` objects have some other interesting properties.
 
 Subsets of assets
-~~~~~~~~~~~~~~~~~
+-----------------
 
 If you only want files of a particular type, you can use the subscript
 operator to filter out a medium of interest. For example::
 
     >>> w = CalendarWidget()
     >>> print(w.media)
-    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/animations.js"></script>
     <script type="text/javascript" src="http://static.example.com/actions.js"></script>
 
     >>> print(w.media['css'])
-    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet">
 
 When you use the subscript operator, the value that is returned is a
 new ``Media`` object -- but one that only contains the media of interest.
 
 Combining ``Media`` objects
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+---------------------------
 
 ``Media`` objects can also be added together. When two ``Media`` objects are
 added, the resulting ``Media`` object contains the union of the assets
@@ -290,13 +300,49 @@ specified by both::
     >>> w1 = CalendarWidget()
     >>> w2 = OtherWidget()
     >>> print(w1.media + w2.media)
-    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/animations.js"></script>
     <script type="text/javascript" src="http://static.example.com/actions.js"></script>
     <script type="text/javascript" src="http://static.example.com/whizbang.js"></script>
 
+.. _form-media-asset-order:
+
+Order of assets
+---------------
+
+The order in which assets are inserted into the DOM is often important. For
+example, you may have a script that depends on jQuery. Therefore, combining
+``Media`` objects attempts to preserve the relative order in which assets are
+defined in each ``Media`` class.
+
+For example::
+
+    >>> from django import forms
+    >>> class CalendarWidget(forms.TextInput):
+    ...     class Media:
+    ...         js = ('jQuery.js', 'calendar.js', 'noConflict.js')
+    >>> class TimeWidget(forms.TextInput):
+    ...     class Media:
+    ...         js = ('jQuery.js', 'time.js', 'noConflict.js')
+    >>> w1 = CalendarWidget()
+    >>> w2 = TimeWidget()
+    >>> print(w1.media + w2.media)
+    <script type="text/javascript" src="http://static.example.com/jQuery.js"></script>
+    <script type="text/javascript" src="http://static.example.com/calendar.js"></script>
+    <script type="text/javascript" src="http://static.example.com/time.js"></script>
+    <script type="text/javascript" src="http://static.example.com/noConflict.js"></script>
+
+Combining ``Media`` objects with assets in a conflicting order results in a
+``MediaOrderConflictWarning``.
+
+.. versionchanged:: 2.0
+
+    In older versions, the assets of ``Media`` objects are concatenated rather
+    than merged in a way that tries to preserve the relative ordering of the
+    elements in each list.
+
 ``Media`` on Forms
-------------------
+==================
 
 Widgets aren't the only objects that can have ``media`` definitions --
 forms can also define ``media``. The rules for ``media`` definitions
@@ -316,7 +362,7 @@ are part of the form::
 
     >>> f = ContactForm()
     >>> f.media
-    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/animations.js"></script>
     <script type="text/javascript" src="http://static.example.com/actions.js"></script>
     <script type="text/javascript" src="http://static.example.com/whizbang.js"></script>
@@ -336,8 +382,8 @@ form::
 
     >>> f = ContactForm()
     >>> f.media
-    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet" />
-    <link href="http://static.example.com/layout.css" type="text/css" media="all" rel="stylesheet" />
+    <link href="http://static.example.com/pretty.css" type="text/css" media="all" rel="stylesheet">
+    <link href="http://static.example.com/layout.css" type="text/css" media="all" rel="stylesheet">
     <script type="text/javascript" src="http://static.example.com/animations.js"></script>
     <script type="text/javascript" src="http://static.example.com/actions.js"></script>
     <script type="text/javascript" src="http://static.example.com/whizbang.js"></script>

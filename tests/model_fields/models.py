@@ -12,7 +12,6 @@ from django.db.models.fields.files import ImageField, ImageFieldFile
 from django.db.models.fields.related import (
     ForeignKey, ForeignObject, ManyToManyField, OneToOneField,
 )
-from django.utils import six
 
 try:
     from PIL import Image
@@ -26,12 +25,12 @@ class Foo(models.Model):
 
 
 def get_foo():
-    return Foo.objects.get(id=1)
+    return Foo.objects.get(id=1).pk
 
 
 class Bar(models.Model):
     b = models.CharField(max_length=10)
-    a = models.ForeignKey(Foo, default=get_foo, related_name=b'bars')
+    a = models.ForeignKey(Foo, models.CASCADE, default=get_foo, related_name='bars')
 
 
 class Whiz(models.Model):
@@ -51,31 +50,16 @@ class Whiz(models.Model):
     c = models.IntegerField(choices=CHOICES, null=True)
 
 
-class Counter(six.Iterator):
-    def __init__(self):
-        self.n = 1
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self.n > 5:
-            raise StopIteration
-        else:
-            self.n += 1
-            return (self.n, 'val-' + str(self.n))
-
-
 class WhizIter(models.Model):
-    c = models.IntegerField(choices=Counter(), null=True)
+    c = models.IntegerField(choices=iter(Whiz.CHOICES), null=True)
 
 
 class WhizIterEmpty(models.Model):
-    c = models.CharField(choices=(x for x in []), blank=True, max_length=1)
+    c = models.CharField(choices=iter(()), blank=True, max_length=1)
 
 
 class BigD(models.Model):
-    d = models.DecimalField(max_digits=38, decimal_places=30)
+    d = models.DecimalField(max_digits=32, decimal_places=30)
 
 
 class FloatModel(models.Model):
@@ -84,6 +68,10 @@ class FloatModel(models.Model):
 
 class BigS(models.Model):
     s = models.SlugField(max_length=255)
+
+
+class UnicodeSlugField(models.Model):
+    s = models.SlugField(max_length=255, allow_unicode=True)
 
 
 class SmallIntegerModel(models.Model):
@@ -113,11 +101,12 @@ class Post(models.Model):
 
 
 class NullBooleanModel(models.Model):
-    nbfield = models.NullBooleanField()
+    nbfield = models.BooleanField(null=True, blank=True)
+    nbfield_old = models.NullBooleanField()
 
 
 class BooleanModel(models.Model):
-    bfield = models.BooleanField(default=None)
+    bfield = models.BooleanField()
     string = models.CharField(max_length=10, default='abc')
 
 
@@ -141,13 +130,13 @@ class PrimaryKeyCharModel(models.Model):
 
 class FksToBooleans(models.Model):
     """Model with FKs to models with {Null,}BooleanField's, #15040"""
-    bf = models.ForeignKey(BooleanModel)
-    nbf = models.ForeignKey(NullBooleanModel)
+    bf = models.ForeignKey(BooleanModel, models.CASCADE)
+    nbf = models.ForeignKey(NullBooleanModel, models.CASCADE)
 
 
 class FkToChar(models.Model):
     """Model with FK to a model with a CharField primary key, #19299"""
-    out = models.ForeignKey(PrimaryKeyCharModel)
+    out = models.ForeignKey(PrimaryKeyCharModel, models.CASCADE)
 
 
 class RenamedField(models.Model):
@@ -159,28 +148,27 @@ class VerboseNameField(models.Model):
     field1 = models.BigIntegerField("verbose field1")
     field2 = models.BooleanField("verbose field2", default=False)
     field3 = models.CharField("verbose field3", max_length=10)
-    field4 = models.CommaSeparatedIntegerField("verbose field4", max_length=99)
-    field5 = models.DateField("verbose field5")
-    field6 = models.DateTimeField("verbose field6")
-    field7 = models.DecimalField("verbose field7", max_digits=6, decimal_places=1)
-    field8 = models.EmailField("verbose field8")
-    field9 = models.FileField("verbose field9", upload_to="unused")
-    field10 = models.FilePathField("verbose field10")
-    field11 = models.FloatField("verbose field11")
+    field4 = models.DateField("verbose field4")
+    field5 = models.DateTimeField("verbose field5")
+    field6 = models.DecimalField("verbose field6", max_digits=6, decimal_places=1)
+    field7 = models.EmailField("verbose field7")
+    field8 = models.FileField("verbose field8", upload_to="unused")
+    field9 = models.FilePathField("verbose field9")
+    field10 = models.FloatField("verbose field10")
     # Don't want to depend on Pillow in this test
     # field_image = models.ImageField("verbose field")
-    field12 = models.IntegerField("verbose field12")
-    field13 = models.GenericIPAddressField("verbose field13", protocol="ipv4")
-    field14 = models.NullBooleanField("verbose field14")
-    field15 = models.PositiveIntegerField("verbose field15")
-    field16 = models.PositiveSmallIntegerField("verbose field16")
-    field17 = models.SlugField("verbose field17")
-    field18 = models.SmallIntegerField("verbose field18")
-    field19 = models.TextField("verbose field19")
-    field20 = models.TimeField("verbose field20")
-    field21 = models.URLField("verbose field21")
-    field22 = models.UUIDField("verbose field22")
-    field23 = models.DurationField("verbose field23")
+    field11 = models.IntegerField("verbose field11")
+    field12 = models.GenericIPAddressField("verbose field12", protocol="ipv4")
+    field13 = models.NullBooleanField("verbose field13")
+    field14 = models.PositiveIntegerField("verbose field14")
+    field15 = models.PositiveSmallIntegerField("verbose field15")
+    field16 = models.SlugField("verbose field16")
+    field17 = models.SmallIntegerField("verbose field17")
+    field18 = models.TextField("verbose field18")
+    field19 = models.TimeField("verbose field19")
+    field20 = models.URLField("verbose field20")
+    field21 = models.UUIDField("verbose field21")
+    field22 = models.DurationField("verbose field22")
 
 
 class GenericIPAddress(models.Model):
@@ -212,7 +200,8 @@ class DataModel(models.Model):
 
 
 class Document(models.Model):
-    myfile = models.FileField(upload_to='unused')
+    myfile = models.FileField(upload_to='unused', unique=True)
+
 
 ###############################################################################
 # ImageField
@@ -226,11 +215,11 @@ if Image:
         """
         def __init__(self, *args, **kwargs):
             self.was_opened = False
-            super(TestImageFieldFile, self).__init__(*args, **kwargs)
+            super().__init__(*args, **kwargs)
 
         def open(self):
             self.was_opened = True
-            super(TestImageFieldFile, self).open()
+            super().open()
 
     class TestImageField(ImageField):
         attr_class = TestImageFieldFile
@@ -247,7 +236,7 @@ if Image:
         name = models.CharField(max_length=50)
         mugshot = TestImageField(storage=temp_storage, upload_to='tests')
 
-    class AbsctractPersonWithHeight(models.Model):
+    class AbstractPersonWithHeight(models.Model):
         """
         Abstract model that defines an ImageField with only one dimension field
         to make sure the dimension update is correctly run on concrete subclass
@@ -260,9 +249,9 @@ if Image:
         class Meta:
             abstract = True
 
-    class PersonWithHeight(AbsctractPersonWithHeight):
+    class PersonWithHeight(AbstractPersonWithHeight):
         """
-        Concrete model that subclass an abctract one with only on dimension
+        Concrete model that subclass an abstract one with only on dimension
         field.
         """
         name = models.CharField(max_length=50)
@@ -294,7 +283,7 @@ if Image:
         Model that:
         * Defines two ImageFields
         * Defines the height/width fields before the ImageFields
-        * Has a nullalble ImageField
+        * Has a nullable ImageField
         """
         name = models.CharField(max_length=50)
         mugshot_height = models.PositiveSmallIntegerField()
@@ -317,7 +306,6 @@ class AllFieldsModel(models.Model):
     binary = models.BinaryField()
     boolean = models.BooleanField(default=False)
     char = models.CharField(max_length=10)
-    csv = models.CommaSeparatedIntegerField(max_length=10)
     date = models.DateField()
     datetime = models.DateTimeField()
     decimal = models.DecimalField(decimal_places=2, max_digits=2)
@@ -339,21 +327,27 @@ class AllFieldsModel(models.Model):
 
     fo = ForeignObject(
         'self',
+        on_delete=models.CASCADE,
         from_fields=['abstract_non_concrete_id'],
         to_fields=['id'],
         related_name='reverse'
     )
     fk = ForeignKey(
         'self',
+        models.CASCADE,
         related_name='reverse2'
     )
     m2m = ManyToManyField('self')
-    oto = OneToOneField('self')
+    oto = OneToOneField('self', models.CASCADE)
 
     object_id = models.PositiveIntegerField()
-    content_type = models.ForeignKey(ContentType)
+    content_type = models.ForeignKey(ContentType, models.CASCADE)
     gfk = GenericForeignKey()
     gr = GenericRelation(DataModel)
+
+
+class ManyToMany(models.Model):
+    m2m = models.ManyToManyField('self')
 
 
 ###############################################################################
@@ -372,7 +366,7 @@ class PrimaryKeyUUIDModel(models.Model):
 
 
 class RelatedToUUIDModel(models.Model):
-    uuid_fk = models.ForeignKey('PrimaryKeyUUIDModel')
+    uuid_fk = models.ForeignKey('PrimaryKeyUUIDModel', models.CASCADE)
 
 
 class UUIDChild(PrimaryKeyUUIDModel):

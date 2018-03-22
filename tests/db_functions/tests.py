@@ -1,27 +1,22 @@
-from __future__ import unicode_literals
-
 from datetime import datetime, timedelta
+from decimal import Decimal
 from unittest import skipIf, skipUnless
 
 from django.db import connection
 from django.db.models import CharField, TextField, Value as V
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import (
-    Coalesce, Concat, Greatest, Least, Length, Lower, Now, Substr, Upper,
+    Coalesce, Concat, ConcatPair, Greatest, Least, Length, Lower, Now,
+    StrIndex, Substr, Upper,
 )
 from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature
-from django.utils import six, timezone
+from django.utils import timezone
 
-from .models import Article, Author, Fan
-
+from .models import Article, Author, DecimalModel, Fan
 
 lorem_ipsum = """
     Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
     tempor incididunt ut labore et dolore magna aliqua."""
-
-
-def truncate_microseconds(value):
-    return value if connection.features.supports_microsecond_precision else value.replace(microsecond=0)
 
 
 class FunctionTests(TestCase):
@@ -121,7 +116,7 @@ class FunctionTests(TestCase):
         articles = Article.objects.annotate(
             last_updated=Greatest('written', 'published'),
         )
-        self.assertEqual(articles.first().last_updated, truncate_microseconds(now))
+        self.assertEqual(articles.first().last_updated, now)
 
     @skipUnlessDBFeature('greatest_least_ignores_nulls')
     def test_greatest_ignores_null(self):
@@ -135,7 +130,7 @@ class FunctionTests(TestCase):
         self.assertEqual(articles.first().last_updated, now)
 
     @skipIfDBFeature('greatest_least_ignores_nulls')
-    def test_greatest_propogates_null(self):
+    def test_greatest_propagates_null(self):
         now = timezone.now()
 
         Article.objects.create(title="Testing with Django", written=now)
@@ -174,7 +169,7 @@ class FunctionTests(TestCase):
                 Coalesce('published', past_sql),
             ),
         )
-        self.assertEqual(articles.first().last_updated, truncate_microseconds(now))
+        self.assertEqual(articles.first().last_updated, now)
 
     def test_greatest_all_null(self):
         Article.objects.create(title="Testing with Django", written=timezone.now())
@@ -203,6 +198,15 @@ class FunctionTests(TestCase):
         author.refresh_from_db()
         self.assertEqual(author.alias, 'Jim')
 
+    def test_greatest_decimal_filter(self):
+        obj = DecimalModel.objects.create(n1=Decimal('1.1'), n2=Decimal('1.2'))
+        self.assertCountEqual(
+            DecimalModel.objects.annotate(
+                greatest=Greatest('n1', 'n2'),
+            ).filter(greatest=Decimal('1.2')),
+            [obj],
+        )
+
     def test_least(self):
         now = timezone.now()
         before = now - timedelta(hours=1)
@@ -216,7 +220,7 @@ class FunctionTests(TestCase):
         articles = Article.objects.annotate(
             first_updated=Least('written', 'published'),
         )
-        self.assertEqual(articles.first().first_updated, truncate_microseconds(before))
+        self.assertEqual(articles.first().first_updated, before)
 
     @skipUnlessDBFeature('greatest_least_ignores_nulls')
     def test_least_ignores_null(self):
@@ -230,7 +234,7 @@ class FunctionTests(TestCase):
         self.assertEqual(articles.first().first_updated, now)
 
     @skipIfDBFeature('greatest_least_ignores_nulls')
-    def test_least_propogates_null(self):
+    def test_least_propagates_null(self):
         now = timezone.now()
 
         Article.objects.create(title="Testing with Django", written=now)
@@ -269,7 +273,7 @@ class FunctionTests(TestCase):
                 Coalesce('published', future_sql),
             ),
         )
-        self.assertEqual(articles.first().last_updated, truncate_microseconds(now))
+        self.assertEqual(articles.first().last_updated, now)
 
     def test_least_all_null(self):
         Article.objects.create(title="Testing with Django", written=timezone.now())
@@ -297,6 +301,15 @@ class FunctionTests(TestCase):
 
         author.refresh_from_db()
         self.assertEqual(author.alias, 'James Smith')
+
+    def test_least_decimal_filter(self):
+        obj = DecimalModel.objects.create(n1=Decimal('1.1'), n2=Decimal('1.2'))
+        self.assertCountEqual(
+            DecimalModel.objects.annotate(
+                least=Least('n1', 'n2'),
+            ).filter(least=Decimal('1.1')),
+            [obj],
+        )
 
     def test_concat(self):
         Author.objects.create(name='Jayden')
@@ -353,6 +366,19 @@ class FunctionTests(TestCase):
         expected = article.title + ' - ' + article.text
         self.assertEqual(expected.upper(), article.title_text)
 
+    @skipUnless(connection.vendor == 'sqlite', "sqlite specific implementation detail.")
+    def test_concat_coalesce_idempotent(self):
+        pair = ConcatPair(V('a'), V('b'))
+        # Check nodes counts
+        self.assertEqual(len(list(pair.flatten())), 3)
+        self.assertEqual(len(list(pair.coalesce().flatten())), 7)  # + 2 Coalesce + 2 Value()
+        self.assertEqual(len(list(pair.flatten())), 3)
+
+    def test_concat_sql_generation_idempotency(self):
+        qs = Article.objects.annotate(description=Concat('title', V(': '), 'summary'))
+        # Multiple compilations should not alter the generated query.
+        self.assertEqual(str(qs.query), str(qs.all().query))
+
     def test_lower(self):
         Author.objects.create(name='John Smith', alias='smithj')
         Author.objects.create(name='Rhonda')
@@ -374,6 +400,9 @@ class FunctionTests(TestCase):
             ],
             lambda a: (a.lower_name, a.name)
         )
+
+        with self.assertRaisesMessage(TypeError, "'Lower' takes exactly 1 argument (2 given)"):
+            Author.objects.update(name=Lower('name', 'name'))
 
     def test_upper(self):
         Author.objects.create(name='John Smith', alias='smithj')
@@ -474,17 +503,18 @@ class FunctionTests(TestCase):
 
         self.assertEqual(a.name_part_1[1:], a.name_part_2)
 
-        with six.assertRaisesRegex(self, ValueError, "'pos' must be greater than 0"):
+        with self.assertRaisesMessage(ValueError, "'pos' must be greater than 0"):
             Author.objects.annotate(raises=Substr('name', 0))
 
     def test_substr_with_expressions(self):
         Author.objects.create(name='John Smith', alias='smithj')
         Author.objects.create(name='Rhonda')
-        authors = Author.objects.annotate(name_part=Substr('name', 5, 3))
+        substr = Substr(Upper('name'), StrIndex('name', V('h')), 5, output_field=CharField())
+        authors = Author.objects.annotate(name_part=substr)
         self.assertQuerysetEqual(
             authors.order_by('name'), [
-                ' Sm',
-                'da',
+                'HN SM',
+                'HONDA',
             ],
             lambda a: a.name_part
         )
@@ -546,4 +576,98 @@ class FunctionTests(TestCase):
             Article.objects.filter(published__gt=Now()),
             ['How to Time Travel'],
             lambda a: a.title
+        )
+
+    def test_length_transform(self):
+        try:
+            CharField.register_lookup(Length)
+            Author.objects.create(name='John Smith', alias='smithj')
+            Author.objects.create(name='Rhonda')
+            authors = Author.objects.filter(name__length__gt=7)
+            self.assertQuerysetEqual(
+                authors.order_by('name'), [
+                    'John Smith',
+                ],
+                lambda a: a.name
+            )
+        finally:
+            CharField._unregister_lookup(Length)
+
+    def test_lower_transform(self):
+        try:
+            CharField.register_lookup(Lower)
+            Author.objects.create(name='John Smith', alias='smithj')
+            Author.objects.create(name='Rhonda')
+            authors = Author.objects.filter(name__lower__exact='john smith')
+            self.assertQuerysetEqual(
+                authors.order_by('name'), [
+                    'John Smith',
+                ],
+                lambda a: a.name
+            )
+        finally:
+            CharField._unregister_lookup(Lower)
+
+    def test_upper_transform(self):
+        try:
+            CharField.register_lookup(Upper)
+            Author.objects.create(name='John Smith', alias='smithj')
+            Author.objects.create(name='Rhonda')
+            authors = Author.objects.filter(name__upper__exact='JOHN SMITH')
+            self.assertQuerysetEqual(
+                authors.order_by('name'), [
+                    'John Smith',
+                ],
+                lambda a: a.name
+            )
+        finally:
+            CharField._unregister_lookup(Upper)
+
+    def test_func_transform_bilateral(self):
+        class UpperBilateral(Upper):
+            bilateral = True
+
+        try:
+            CharField.register_lookup(UpperBilateral)
+            Author.objects.create(name='John Smith', alias='smithj')
+            Author.objects.create(name='Rhonda')
+            authors = Author.objects.filter(name__upper__exact='john smith')
+            self.assertQuerysetEqual(
+                authors.order_by('name'), [
+                    'John Smith',
+                ],
+                lambda a: a.name
+            )
+        finally:
+            CharField._unregister_lookup(UpperBilateral)
+
+    def test_func_transform_bilateral_multivalue(self):
+        class UpperBilateral(Upper):
+            bilateral = True
+
+        try:
+            CharField.register_lookup(UpperBilateral)
+            Author.objects.create(name='John Smith', alias='smithj')
+            Author.objects.create(name='Rhonda')
+            authors = Author.objects.filter(name__upper__in=['john smith', 'rhonda'])
+            self.assertQuerysetEqual(
+                authors.order_by('name'), [
+                    'John Smith',
+                    'Rhonda',
+                ],
+                lambda a: a.name
+            )
+        finally:
+            CharField._unregister_lookup(UpperBilateral)
+
+    def test_function_as_filter(self):
+        Author.objects.create(name='John Smith', alias='SMITHJ')
+        Author.objects.create(name='Rhonda')
+        self.assertQuerysetEqual(
+            Author.objects.filter(alias=Upper(V('smithj'))),
+            ['John Smith'], lambda x: x.name
+        )
+        self.assertQuerysetEqual(
+            Author.objects.exclude(alias=Upper(V('smithj'))),
+            ['Rhonda'], lambda x: x.name
         )

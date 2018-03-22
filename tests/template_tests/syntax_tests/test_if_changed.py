@@ -161,7 +161,7 @@ class IfChangedTests(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         cls.engine = Engine()
-        super(IfChangedTests, cls).setUpClass()
+        super().setUpClass()
 
     def test_ifchanged_concurrency(self):
         """
@@ -182,7 +182,9 @@ class IfChangedTests(SimpleTestCase):
             # When the IfChangeNode stores state at 'self' it stays at '3' and skip the last yielded value below.
             iter2 = iter([1, 2, 3])
             output2 = template.render(Context({'foo': range(3), 'get_value': lambda: next(iter2)}))
-            self.assertEqual(output2, '[0,1,2,3]', 'Expected [0,1,2,3] in second parallel template, got {}'.format(output2))
+            self.assertEqual(
+                output2, '[0,1,2,3]', 'Expected [0,1,2,3] in second parallel template, got {}'.format(output2)
+            )
             yield 3
 
         gen1 = gen()
@@ -208,5 +210,16 @@ class IfChangedTests(SimpleTestCase):
                 'include': '{% ifchanged %}{{ x }}{% endifchanged %}',
             }),
         ])
-        output = engine.render_to_string('template', dict(vars=[1, 1, 2, 2, 3, 3]))
+        output = engine.render_to_string('template', {'vars': [1, 1, 2, 2, 3, 3]})
         self.assertEqual(output, "123")
+
+    def test_include_state(self):
+        """Tests the node state for different IncludeNodes (#27974)."""
+        engine = Engine(loaders=[
+            ('django.template.loaders.locmem.Loader', {
+                'template': '{% for x in vars %}{% include "include" %}{% include "include" %}{% endfor %}',
+                'include': '{% ifchanged %}{{ x }}{% endifchanged %}',
+            }),
+        ])
+        output = engine.render_to_string('template', {'vars': [1, 1, 2, 2, 3, 3]})
+        self.assertEqual(output, '112233')

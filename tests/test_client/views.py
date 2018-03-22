@@ -1,3 +1,5 @@
+import json
+from urllib.parse import urlencode
 from xml.dom.minidom import parseString
 
 from django.contrib.auth.decorators import login_required, permission_required
@@ -9,10 +11,10 @@ from django.http import (
     HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed,
     HttpResponseNotFound, HttpResponseRedirect,
 )
-from django.shortcuts import render_to_response
+from django.shortcuts import render
 from django.template import Context, Template
+from django.test import Client
 from django.utils.decorators import method_decorator
-from django.utils.six.moves.urllib.parse import urlencode
 
 
 def get_view(request):
@@ -48,6 +50,19 @@ def trace_view(request):
         return HttpResponse(t.render(c))
 
 
+def put_view(request):
+    if request.method == 'PUT':
+        t = Template('Data received: {{ data }} is the body.', name='PUT Template')
+        c = Context({
+            'Content-Length': request.META['CONTENT_LENGTH'],
+            'data': request.body.decode(),
+        })
+    else:
+        t = Template('Viewing GET page.', name='Empty GET Template')
+        c = Context()
+    return HttpResponse(t.render(c))
+
+
 def post_view(request):
     """A view that expects a POST, and returns a different template depending
     on whether any POST data is available
@@ -62,7 +77,20 @@ def post_view(request):
     else:
         t = Template('Viewing GET page.', name='Empty GET Template')
         c = Context()
+    return HttpResponse(t.render(c))
 
+
+def json_view(request):
+    """
+    A view that expects a request with the header 'application/json' and JSON
+    data with a key named 'value'.
+    """
+    if request.META.get('CONTENT_TYPE') != 'application/json':
+        return HttpResponse()
+
+    t = Template('Viewing {} page. With data {{ data }}.'.format(request.method))
+    data = json.loads(request.body.decode('utf-8'))
+    c = Context({'data': data['value']})
     return HttpResponse(t.render(c))
 
 
@@ -98,6 +126,20 @@ def redirect_view(request):
     return HttpResponseRedirect('/get_view/' + query)
 
 
+def _post_view_redirect(request, status_code):
+    """Redirect to /post_view/ using the status code."""
+    redirect_to = request.GET.get('to', '/post_view/')
+    return HttpResponseRedirect(redirect_to, status=status_code)
+
+
+def method_saving_307_redirect_view(request):
+    return _post_view_redirect(request, 307)
+
+
+def method_saving_308_redirect_view(request):
+    return _post_view_redirect(request, 308)
+
+
 def view_with_secure(request):
     "A view that indicates if the request was secure"
     response = HttpResponse()
@@ -114,6 +156,7 @@ def double_redirect_view(request):
 def bad_view(request):
     "A view that returns a 404 with some error content"
     return HttpResponseNotFound('Not found!. This page contains some MAGIC content')
+
 
 TestChoices = (
     ('a', 'First Choice'),
@@ -167,17 +210,15 @@ def form_view_with_template(request):
     else:
         form = TestForm()
         message = 'GET form page'
-    return render_to_response('form_view.html',
-        {
-            'form': form,
-            'message': message
-        }
-    )
+    return render(request, 'form_view.html', {
+        'form': form,
+        'message': message,
+    })
 
 
 class BaseTestFormSet(BaseFormSet):
     def clean(self):
-        """Checks that no two email addresses are the same."""
+        """No two email addresses are the same."""
         if any(self.errors):
             # Don't bother validating the formset unless each form is valid
             return
@@ -191,6 +232,7 @@ class BaseTestFormSet(BaseFormSet):
                     "Forms in a set must have distinct email addresses."
                 )
             emails.append(email)
+
 
 TestFormSet = formset_factory(TestForm, BaseTestFormSet)
 
@@ -214,22 +256,21 @@ def formset_view(request):
     return HttpResponse(t.render(c))
 
 
+@login_required
 def login_protected_view(request):
     "A simple view that is login protected."
     t = Template('This is a login protected test. Username is {{ user.username }}.', name='Login Template')
     c = Context({'user': request.user})
 
     return HttpResponse(t.render(c))
-login_protected_view = login_required(login_protected_view)
 
 
+@login_required(redirect_field_name='redirect_to')
 def login_protected_view_changed_redirect(request):
     "A simple view that is login protected with a custom redirect field set"
     t = Template('This is a login protected test. Username is {{ user.username }}.', name='Login Template')
     c = Context({'user': request.user})
-
     return HttpResponse(t.render(c))
-login_protected_view_changed_redirect = login_required(redirect_field_name="redirect_to")(login_protected_view_changed_redirect)
 
 
 def _permission_protected_view(request):
@@ -240,11 +281,15 @@ def _permission_protected_view(request):
                  name='Permissions Template')
     c = Context({'user': request.user})
     return HttpResponse(t.render(c))
+
+
 permission_protected_view = permission_required('permission_not_granted')(_permission_protected_view)
-permission_protected_view_exception = permission_required('permission_not_granted', raise_exception=True)(_permission_protected_view)
+permission_protected_view_exception = (
+    permission_required('permission_not_granted', raise_exception=True)(_permission_protected_view)
+)
 
 
-class _ViewManager(object):
+class _ViewManager:
     @method_decorator(login_required)
     def login_protected_view(self, request):
         t = Template('This is a login protected test using a method. '
@@ -261,6 +306,7 @@ class _ViewManager(object):
                      name='Permissions Template')
         c = Context({'user': request.user})
         return HttpResponse(t.render(c))
+
 
 _view_manager = _ViewManager()
 login_protected_method_view = _view_manager.login_protected_view
@@ -309,5 +355,29 @@ def mass_mail_sending_view(request):
     return HttpResponse("Mail sent")
 
 
+def nesting_exception_view(request):
+    """
+    A view that uses a nested client to call another view and then raises an
+    exception.
+    """
+    client = Client()
+    client.get('/get_view/')
+    raise Exception('exception message')
+
+
 def django_project_redirect(request):
     return HttpResponseRedirect('https://www.djangoproject.com/')
+
+
+def upload_view(request):
+    """Prints keys of request.FILES to the response."""
+    return HttpResponse(', '.join(request.FILES))
+
+
+class TwoArgException(Exception):
+    def __init__(self, one, two):
+        pass
+
+
+def two_arg_exception(request):
+    raise TwoArgException('one', 'two')

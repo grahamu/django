@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from django.contrib import admin
 from django.db import models
 
@@ -13,7 +12,7 @@ class Band(models.Model):
 
 
 class Song(models.Model):
-    band = models.ForeignKey(Band)
+    band = models.ForeignKey(Band, models.CASCADE)
     name = models.CharField(max_length=100)
     duration = models.IntegerField()
     other_interpreters = models.ManyToManyField(Band, related_name='covers')
@@ -28,7 +27,7 @@ class SongInlineDefaultOrdering(admin.StackedInline):
 
 class SongInlineNewOrdering(admin.StackedInline):
     model = Song
-    ordering = ('duration', )
+    ordering = ('duration',)
 
 
 class DynOrderingBandAdmin(admin.ModelAdmin):

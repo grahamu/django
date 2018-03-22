@@ -1,27 +1,22 @@
-# -*- encoding: utf-8 -*-
-from __future__ import unicode_literals
-
 import unittest
 
 from django.core.checks import Error, Warning as DjangoWarning
 from django.db import connection, models
-from django.test import TestCase
-from django.test.utils import override_settings
+from django.test import SimpleTestCase, TestCase, skipIfDBFeature
+from django.test.utils import isolate_apps, override_settings
 from django.utils.timezone import now
+from django.utils.translation import gettext_lazy as _
 
-from .base import IsolatedModelsTestCase
 
-
-class AutoFieldTests(IsolatedModelsTestCase):
+@isolate_apps('invalid_models_tests')
+class AutoFieldTests(SimpleTestCase):
 
     def test_valid_case(self):
         class Model(models.Model):
             id = models.AutoField(primary_key=True)
 
         field = Model._meta.get_field('id')
-        errors = field.check()
-        expected = []
-        self.assertEqual(errors, expected)
+        self.assertEqual(field.check(), [])
 
     def test_primary_key(self):
         # primary_key must be True. Refs #12467.
@@ -34,38 +29,17 @@ class AutoFieldTests(IsolatedModelsTestCase):
             another = models.IntegerField(primary_key=True)
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 'AutoFields must set primary_key=True.',
-                hint=None,
                 obj=field,
                 id='fields.E100',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
 
-class BooleanFieldTests(IsolatedModelsTestCase):
-
-    def test_nullable_boolean_field(self):
-        class Model(models.Model):
-            field = models.BooleanField(null=True)
-
-        field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
-            Error(
-                'BooleanFields do not accept null values.',
-                hint='Use a NullBooleanField instead.',
-                obj=field,
-                id='fields.E110',
-            ),
-        ]
-        self.assertEqual(errors, expected)
-
-
-class CharFieldTests(IsolatedModelsTestCase, TestCase):
+@isolate_apps('invalid_models_tests')
+class CharFieldTests(TestCase):
 
     def test_valid_field(self):
         class Model(models.Model):
@@ -75,124 +49,235 @@ class CharFieldTests(IsolatedModelsTestCase, TestCase):
                     ('1', 'item1'),
                     ('2', 'item2'),
                 ],
-                db_index=True)
+                db_index=True,
+            )
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = []
-        self.assertEqual(errors, expected)
+        self.assertEqual(field.check(), [])
 
     def test_missing_max_length(self):
         class Model(models.Model):
             field = models.CharField()
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "CharFields must define a 'max_length' attribute.",
-                hint=None,
                 obj=field,
                 id='fields.E120',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
     def test_negative_max_length(self):
         class Model(models.Model):
             field = models.CharField(max_length=-1)
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'max_length' must be a positive integer.",
-                hint=None,
                 obj=field,
                 id='fields.E121',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
     def test_bad_max_length_value(self):
         class Model(models.Model):
             field = models.CharField(max_length="bad")
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'max_length' must be a positive integer.",
-                hint=None,
                 obj=field,
                 id='fields.E121',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
     def test_str_max_length_value(self):
         class Model(models.Model):
             field = models.CharField(max_length='20')
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'max_length' must be a positive integer.",
-                hint=None,
                 obj=field,
                 id='fields.E121',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
+
+    def test_str_max_length_type(self):
+        class Model(models.Model):
+            field = models.CharField(max_length=True)
+
+        field = Model._meta.get_field('field')
+        self.assertEqual(field.check(), [
+            Error(
+                "'max_length' must be a positive integer.",
+                obj=field,
+                id='fields.E121'
+            ),
+        ])
 
     def test_non_iterable_choices(self):
         class Model(models.Model):
             field = models.CharField(max_length=10, choices='bad')
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'choices' must be an iterable (e.g., a list or tuple).",
-                hint=None,
                 obj=field,
                 id='fields.E004',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
+
+    def test_non_iterable_choices_two_letters(self):
+        """Two letters isn't a valid choice pair."""
+        class Model(models.Model):
+            field = models.CharField(max_length=10, choices=['ab'])
+
+        field = Model._meta.get_field('field')
+        self.assertEqual(field.check(), [
+            Error(
+                "'choices' must be an iterable containing (actual value, "
+                "human readable name) tuples.",
+                obj=field,
+                id='fields.E005',
+            ),
+        ])
+
+    def test_iterable_of_iterable_choices(self):
+        class ThingItem:
+            def __init__(self, value, display):
+                self.value = value
+                self.display = display
+
+            def __iter__(self):
+                return (x for x in [self.value, self.display])
+
+            def __len__(self):
+                return 2
+
+        class Things:
+            def __iter__(self):
+                return (x for x in [ThingItem(1, 2), ThingItem(3, 4)])
+
+        class ThingWithIterableChoices(models.Model):
+            thing = models.CharField(max_length=100, blank=True, choices=Things())
+
+        self.assertEqual(ThingWithIterableChoices._meta.get_field('thing').check(), [])
 
     def test_choices_containing_non_pairs(self):
         class Model(models.Model):
             field = models.CharField(max_length=10, choices=[(1, 2, 3), (1, 2, 3)])
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'choices' must be an iterable containing (actual value, human readable name) tuples.",
-                hint=None,
                 obj=field,
                 id='fields.E005',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
+
+    def test_choices_containing_lazy(self):
+        class Model(models.Model):
+            field = models.CharField(max_length=10, choices=[['1', _('1')], ['2', _('2')]])
+
+        self.assertEqual(Model._meta.get_field('field').check(), [])
+
+    def test_choices_named_group(self):
+        class Model(models.Model):
+            field = models.CharField(
+                max_length=10, choices=[
+                    ['knights', [['L', 'Lancelot'], ['G', 'Galahad']]],
+                    ['wizards', [['T', 'Tim the Enchanter']]],
+                    ['R', 'Random character'],
+                ],
+            )
+
+        self.assertEqual(Model._meta.get_field('field').check(), [])
+
+    def test_choices_named_group_non_pairs(self):
+        class Model(models.Model):
+            field = models.CharField(
+                max_length=10,
+                choices=[['knights', [['L', 'Lancelot', 'Du Lac']]]],
+            )
+
+        field = Model._meta.get_field('field')
+        self.assertEqual(field.check(), [
+            Error(
+                "'choices' must be an iterable containing (actual value, "
+                "human readable name) tuples.",
+                obj=field,
+                id='fields.E005',
+            ),
+        ])
+
+    def test_choices_named_group_bad_structure(self):
+        class Model(models.Model):
+            field = models.CharField(
+                max_length=10, choices=[
+                    ['knights', [
+                        ['Noble', [['G', 'Galahad']]],
+                        ['Combative', [['L', 'Lancelot']]],
+                    ]],
+                ],
+            )
+
+        field = Model._meta.get_field('field')
+        self.assertEqual(field.check(), [
+            Error(
+                "'choices' must be an iterable containing (actual value, "
+                "human readable name) tuples.",
+                obj=field,
+                id='fields.E005',
+            ),
+        ])
+
+    def test_choices_named_group_lazy(self):
+        class Model(models.Model):
+            field = models.CharField(
+                max_length=10, choices=[
+                    [_('knights'), [['L', _('Lancelot')], ['G', _('Galahad')]]],
+                    ['R', _('Random character')],
+                ],
+            )
+
+        self.assertEqual(Model._meta.get_field('field').check(), [])
 
     def test_bad_db_index_value(self):
         class Model(models.Model):
             field = models.CharField(max_length=10, db_index='bad')
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'db_index' must be None, True or False.",
-                hint=None,
                 obj=field,
                 id='fields.E006',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
+
+    def test_bad_validators(self):
+        class Model(models.Model):
+            field = models.CharField(max_length=10, validators=[True])
+
+        field = Model._meta.get_field('field')
+        self.assertEqual(field.check(), [
+            Error(
+                "All 'validators' must be callable.",
+                hint=(
+                    "validators[0] (True) isn't a function or instance of a "
+                    "validator class."
+                ),
+                obj=field,
+                id='fields.E008',
+            ),
+        ])
 
     @unittest.skipUnless(connection.vendor == 'mysql',
                          "Test valid only for MySQL")
@@ -203,20 +288,19 @@ class CharFieldTests(IsolatedModelsTestCase, TestCase):
             field = models.CharField(unique=True, max_length=256)
 
         field = Model._meta.get_field('field')
-        validator = DatabaseValidation(connection=None)
-        errors = validator.check_field(field)
-        expected = [
+        validator = DatabaseValidation(connection=connection)
+        self.assertEqual(validator.check_field(field), [
             Error(
                 'MySQL does not allow unique CharFields to have a max_length > 255.',
-                hint=None,
                 obj=field,
                 id='mysql.E001',
             )
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
 
-class DateFieldTests(IsolatedModelsTestCase, TestCase):
+@isolate_apps('invalid_models_tests')
+class DateFieldTests(TestCase):
+    maxDiff = None
 
     def test_auto_now_and_auto_now_add_raise_error(self):
         class Model(models.Model):
@@ -233,7 +317,6 @@ class DateFieldTests(IsolatedModelsTestCase, TestCase):
                 "The options auto_now, auto_now_add, and default "
                 "are mutually exclusive. Only one of these options "
                 "may be present.",
-                hint=None,
                 obj=field,
                 id='fields.E160',
             ))
@@ -252,7 +335,7 @@ class DateFieldTests(IsolatedModelsTestCase, TestCase):
         errors = field_dt.check()
         errors.extend(field_d.check())
         errors.extend(field_now.check())  # doesn't raise a warning
-        expected = [
+        self.assertEqual(errors, [
             DjangoWarning(
                 'Fixed default value provided.',
                 hint='It seems you set a fixed date / time / datetime '
@@ -271,18 +354,16 @@ class DateFieldTests(IsolatedModelsTestCase, TestCase):
                 obj=field_d,
                 id='fields.W161',
             )
-        ]
-        maxDiff = self.maxDiff
-        self.maxDiff = None
-        self.assertEqual(errors, expected)
-        self.maxDiff = maxDiff
+        ])
 
     @override_settings(USE_TZ=True)
     def test_fix_default_value_tz(self):
         self.test_fix_default_value()
 
 
-class DateTimeFieldTests(IsolatedModelsTestCase, TestCase):
+@isolate_apps('invalid_models_tests')
+class DateTimeFieldTests(TestCase):
+    maxDiff = None
 
     def test_fix_default_value(self):
         class Model(models.Model):
@@ -296,7 +377,7 @@ class DateTimeFieldTests(IsolatedModelsTestCase, TestCase):
         errors = field_dt.check()
         errors.extend(field_d.check())
         errors.extend(field_now.check())  # doesn't raise a warning
-        expected = [
+        self.assertEqual(errors, [
             DjangoWarning(
                 'Fixed default value provided.',
                 hint='It seems you set a fixed date / time / datetime '
@@ -315,195 +396,183 @@ class DateTimeFieldTests(IsolatedModelsTestCase, TestCase):
                 obj=field_d,
                 id='fields.W161',
             )
-        ]
-        maxDiff = self.maxDiff
-        self.maxDiff = None
-        self.assertEqual(errors, expected)
-        self.maxDiff = maxDiff
+        ])
 
     @override_settings(USE_TZ=True)
     def test_fix_default_value_tz(self):
         self.test_fix_default_value()
 
 
-class DecimalFieldTests(IsolatedModelsTestCase):
+@isolate_apps('invalid_models_tests')
+class DecimalFieldTests(SimpleTestCase):
 
     def test_required_attributes(self):
         class Model(models.Model):
             field = models.DecimalField()
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "DecimalFields must define a 'decimal_places' attribute.",
-                hint=None,
                 obj=field,
                 id='fields.E130',
             ),
             Error(
                 "DecimalFields must define a 'max_digits' attribute.",
-                hint=None,
                 obj=field,
                 id='fields.E132',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
     def test_negative_max_digits_and_decimal_places(self):
         class Model(models.Model):
             field = models.DecimalField(max_digits=-1, decimal_places=-1)
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'decimal_places' must be a non-negative integer.",
-                hint=None,
                 obj=field,
                 id='fields.E131',
             ),
             Error(
                 "'max_digits' must be a positive integer.",
-                hint=None,
                 obj=field,
                 id='fields.E133',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
     def test_bad_values_of_max_digits_and_decimal_places(self):
         class Model(models.Model):
             field = models.DecimalField(max_digits="bad", decimal_places="bad")
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'decimal_places' must be a non-negative integer.",
-                hint=None,
                 obj=field,
                 id='fields.E131',
             ),
             Error(
                 "'max_digits' must be a positive integer.",
-                hint=None,
                 obj=field,
                 id='fields.E133',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
     def test_decimal_places_greater_than_max_digits(self):
         class Model(models.Model):
             field = models.DecimalField(max_digits=9, decimal_places=10)
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'max_digits' must be greater or equal to 'decimal_places'.",
-                hint=None,
                 obj=field,
                 id='fields.E134',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
     def test_valid_field(self):
         class Model(models.Model):
             field = models.DecimalField(max_digits=10, decimal_places=10)
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = []
-        self.assertEqual(errors, expected)
+        self.assertEqual(field.check(), [])
 
 
-class FileFieldTests(IsolatedModelsTestCase):
+@isolate_apps('invalid_models_tests')
+class FileFieldTests(SimpleTestCase):
+
+    def test_valid_default_case(self):
+        class Model(models.Model):
+            field = models.FileField()
+
+        self.assertEqual(Model._meta.get_field('field').check(), [])
 
     def test_valid_case(self):
         class Model(models.Model):
             field = models.FileField(upload_to='somewhere')
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = []
-        self.assertEqual(errors, expected)
-
-    def test_unique(self):
-        class Model(models.Model):
-            field = models.FileField(unique=False, upload_to='somewhere')
-
-        field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
-            Error(
-                "'unique' is not a valid argument for a FileField.",
-                hint=None,
-                obj=field,
-                id='fields.E200',
-            )
-        ]
-        self.assertEqual(errors, expected)
+        self.assertEqual(field.check(), [])
 
     def test_primary_key(self):
         class Model(models.Model):
             field = models.FileField(primary_key=False, upload_to='somewhere')
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "'primary_key' is not a valid argument for a FileField.",
-                hint=None,
                 obj=field,
                 id='fields.E201',
             )
-        ]
-        self.assertEqual(errors, expected)
+        ])
+
+    def test_upload_to_starts_with_slash(self):
+        class Model(models.Model):
+            field = models.FileField(upload_to='/somewhere')
+
+        field = Model._meta.get_field('field')
+        self.assertEqual(field.check(), [
+            Error(
+                "FileField's 'upload_to' argument must be a relative path, not "
+                "an absolute path.",
+                obj=field,
+                id='fields.E202',
+                hint='Remove the leading slash.',
+            )
+        ])
+
+    def test_upload_to_callable_not_checked(self):
+        def callable(instance, filename):
+            return '/' + filename
+
+        class Model(models.Model):
+            field = models.FileField(upload_to=callable)
+
+        field = Model._meta.get_field('field')
+        self.assertEqual(field.check(), [])
 
 
-class FilePathFieldTests(IsolatedModelsTestCase):
+@isolate_apps('invalid_models_tests')
+class FilePathFieldTests(SimpleTestCase):
 
     def test_forbidden_files_and_folders(self):
         class Model(models.Model):
             field = models.FilePathField(allow_files=False, allow_folders=False)
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 "FilePathFields must have either 'allow_files' or 'allow_folders' set to True.",
-                hint=None,
                 obj=field,
                 id='fields.E140',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
 
-class GenericIPAddressFieldTests(IsolatedModelsTestCase):
+@isolate_apps('invalid_models_tests')
+class GenericIPAddressFieldTests(SimpleTestCase):
 
     def test_non_nullable_blank(self):
         class Model(models.Model):
             field = models.GenericIPAddressField(null=False, blank=True)
 
         field = Model._meta.get_field('field')
-        errors = field.check()
-        expected = [
+        self.assertEqual(field.check(), [
             Error(
                 ('GenericIPAddressFields cannot have blank=True if null=False, '
                  'as blank values are stored as nulls.'),
-                hint=None,
                 obj=field,
                 id='fields.E150',
             ),
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
 
-class ImageFieldTests(IsolatedModelsTestCase):
+@isolate_apps('invalid_models_tests')
+class ImageFieldTests(SimpleTestCase):
 
     def test_pillow_installed(self):
         try:
@@ -530,26 +599,27 @@ class ImageFieldTests(IsolatedModelsTestCase):
         self.assertEqual(errors, expected)
 
 
-class IntegerFieldTests(IsolatedModelsTestCase):
+@isolate_apps('invalid_models_tests')
+class IntegerFieldTests(SimpleTestCase):
 
     def test_max_length_warning(self):
         class Model(models.Model):
             value = models.IntegerField(max_length=2)
 
-        value = Model._meta.get_field('value')
-        errors = Model.check()
-        expected = [
+        field = Model._meta.get_field('value')
+        self.assertEqual(field.check(), [
             DjangoWarning(
                 "'max_length' is ignored when used with IntegerField",
                 hint="Remove 'max_length' from field",
-                obj=value,
+                obj=field,
                 id='fields.W122',
             )
-        ]
-        self.assertEqual(errors, expected)
+        ])
 
 
-class TimeFieldTests(IsolatedModelsTestCase, TestCase):
+@isolate_apps('invalid_models_tests')
+class TimeFieldTests(TestCase):
+    maxDiff = None
 
     def test_fix_default_value(self):
         class Model(models.Model):
@@ -563,7 +633,7 @@ class TimeFieldTests(IsolatedModelsTestCase, TestCase):
         errors = field_dt.check()
         errors.extend(field_t.check())
         errors.extend(field_now.check())  # doesn't raise a warning
-        expected = [
+        self.assertEqual(errors, [
             DjangoWarning(
                 'Fixed default value provided.',
                 hint='It seems you set a fixed date / time / datetime '
@@ -582,12 +652,31 @@ class TimeFieldTests(IsolatedModelsTestCase, TestCase):
                 obj=field_t,
                 id='fields.W161',
             )
-        ]
-        maxDiff = self.maxDiff
-        self.maxDiff = None
-        self.assertEqual(errors, expected)
-        self.maxDiff = maxDiff
+        ])
 
     @override_settings(USE_TZ=True)
     def test_fix_default_value_tz(self):
         self.test_fix_default_value()
+
+
+@isolate_apps('invalid_models_tests')
+class TextFieldTests(TestCase):
+
+    @skipIfDBFeature('supports_index_on_text_field')
+    def test_max_length_warning(self):
+        class Model(models.Model):
+            value = models.TextField(db_index=True)
+        field = Model._meta.get_field('value')
+        field_type = field.db_type(connection)
+        self.assertEqual(field.check(), [
+            DjangoWarning(
+                '%s does not support a database index on %s columns.'
+                % (connection.display_name, field_type),
+                hint=(
+                    "An index won't be created. Silence this warning if you "
+                    "don't care about it."
+                ),
+                obj=field,
+                id='fields.W162',
+            )
+        ])

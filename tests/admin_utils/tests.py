@@ -1,19 +1,15 @@
-from __future__ import unicode_literals
-
 from datetime import datetime
 from decimal import Decimal
 
 from django import forms
 from django.conf import settings
-from django.contrib import admin
 from django.contrib.admin import helpers
 from django.contrib.admin.utils import (
-    NestedObjects, display_for_field, flatten, flatten_fieldsets,
-    label_for_field, lookup_field, quote,
+    NestedObjects, display_for_field, display_for_value, flatten,
+    flatten_fieldsets, label_for_field, lookup_field, quote,
 )
 from django.db import DEFAULT_DB_ALIAS, models
-from django.test import TestCase, override_settings
-from django.utils import six
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils.formats import localize
 from django.utils.safestring import mark_safe
 
@@ -74,7 +70,7 @@ class NestedObjectsTests(TestCase):
 
     def test_on_delete_do_nothing(self):
         """
-        Check that the nested collector doesn't query for DO_NOTHING objects.
+        The nested collector doesn't query for DO_NOTHING objects.
         """
         n = NestedObjects(using=DEFAULT_DB_ALIAS)
         objs = [Event.objects.create()]
@@ -85,16 +81,16 @@ class NestedObjectsTests(TestCase):
 
     def test_relation_on_abstract(self):
         """
-        #21846 -- Check that `NestedObjects.collect()` doesn't trip
-        (AttributeError) on the special notation for relations on abstract
-        models (related_name that contains %(app_label)s and/or %(class)s).
+        NestedObjects.collect() doesn't trip (AttributeError) on the special
+        notation for relations on abstract models (related_name that contains
+        %(app_label)s and/or %(class)s) (#21846).
         """
         n = NestedObjects(using=DEFAULT_DB_ALIAS)
         Car.objects.create()
         n.collect([Vehicle.objects.first()])
 
 
-class UtilsTests(TestCase):
+class UtilsTests(SimpleTestCase):
 
     empty_value = '-empty-'
 
@@ -109,13 +105,14 @@ class UtilsTests(TestCase):
         SIMPLE_FUNCTION = 'function'
         INSTANCE_ATTRIBUTE = 'attr'
 
-        class MockModelAdmin(object):
+        class MockModelAdmin:
             def get_admin_value(self, obj):
                 return ADMIN_METHOD
 
-        simple_function = lambda obj: SIMPLE_FUNCTION
+        def simple_function(obj):
+            return SIMPLE_FUNCTION
 
-        site_obj = Site.objects.create(domain=SITE_NAME)
+        site_obj = Site(domain=SITE_NAME)
         article = Article(
             site=site_obj,
             title=TITLE_TEXT,
@@ -166,7 +163,11 @@ class UtilsTests(TestCase):
         # Regression test for #13071: NullBooleanField has special
         # handling.
         display_value = display_for_field(None, models.NullBooleanField(), self.empty_value)
-        expected = '<img src="%sadmin/img/icon-unknown.gif" alt="None" />' % settings.STATIC_URL
+        expected = '<img src="%sadmin/img/icon-unknown.svg" alt="None">' % settings.STATIC_URL
+        self.assertHTMLEqual(display_value, expected)
+
+        display_value = display_for_field(None, models.BooleanField(null=True), self.empty_value)
+        expected = '<img src="%sadmin/img/icon-unknown.svg" alt="None" />' % settings.STATIC_URL
         self.assertHTMLEqual(display_value, expected)
 
         display_value = display_for_field(None, models.DecimalField(), self.empty_value)
@@ -186,7 +187,7 @@ class UtilsTests(TestCase):
         self.assertEqual(display_value, '12345')
 
     @override_settings(USE_L10N=True, USE_THOUSAND_SEPARATOR=True)
-    def test_number_formats_with_thousand_seperator_display_for_field(self):
+    def test_number_formats_with_thousand_separator_display_for_field(self):
         display_value = display_for_field(12345.6789, models.FloatField(), self.empty_value)
         self.assertEqual(display_value, '12,345.6789')
 
@@ -195,6 +196,26 @@ class UtilsTests(TestCase):
 
         display_value = display_for_field(12345, models.IntegerField(), self.empty_value)
         self.assertEqual(display_value, '12,345')
+
+    def test_list_display_for_value(self):
+        display_value = display_for_value([1, 2, 3], self.empty_value)
+        self.assertEqual(display_value, '1, 2, 3')
+
+        display_value = display_for_value([1, 2, 'buckle', 'my', 'shoe'], self.empty_value)
+        self.assertEqual(display_value, '1, 2, buckle, my, shoe')
+
+    @override_settings(USE_L10N=True, USE_THOUSAND_SEPARATOR=True)
+    def test_list_display_for_value_boolean(self):
+        self.assertEqual(
+            display_for_value(True, '', boolean=True),
+            '<img src="/static/admin/img/icon-yes.svg" alt="True">'
+        )
+        self.assertEqual(
+            display_for_value(False, '', boolean=True),
+            '<img src="/static/admin/img/icon-no.svg" alt="False">'
+        )
+        self.assertEqual(display_for_value(True, ''), 'True')
+        self.assertEqual(display_for_value(False, ''), 'False')
 
     def test_label_for_field(self):
         """
@@ -205,27 +226,21 @@ class UtilsTests(TestCase):
             "title"
         )
         self.assertEqual(
-            label_for_field("title2", Article),
-            "another name"
+            label_for_field("hist", Article),
+            "History"
         )
         self.assertEqual(
-            label_for_field("title2", Article, return_attr=True),
-            ("another name", None)
+            label_for_field("hist", Article, return_attr=True),
+            ("History", None)
         )
 
-        self.assertEqual(
-            label_for_field("__unicode__", Article),
-            "article"
-        )
         self.assertEqual(
             label_for_field("__str__", Article),
-            str("article")
+            "article"
         )
 
-        self.assertRaises(
-            AttributeError,
-            lambda: label_for_field("unknown", Article)
-        )
+        with self.assertRaisesMessage(AttributeError, "Unable to lookup 'unknown' on Article"):
+            label_for_field("unknown", Article)
 
         def test_callable(obj):
             return "nothing"
@@ -255,8 +270,9 @@ class UtilsTests(TestCase):
             label_for_field(lambda x: "nothing", Article),
             "--"
         )
+        self.assertEqual(label_for_field('site_id', Article), 'Site id')
 
-        class MockModelAdmin(object):
+        class MockModelAdmin:
             def test_from_model(self, obj):
                 return "nothing"
             test_from_model.short_description = "not Really the Model"
@@ -266,16 +282,14 @@ class UtilsTests(TestCase):
             "not Really the Model"
         )
         self.assertEqual(
-            label_for_field("test_from_model", Article,
-                model_admin=MockModelAdmin,
-                return_attr=True),
+            label_for_field("test_from_model", Article, model_admin=MockModelAdmin, return_attr=True),
             ("not Really the Model", MockModelAdmin.test_from_model)
         )
 
     def test_label_for_property(self):
         # NOTE: cannot use @property decorator, because of
         # AttributeError: 'property' object has no attribute 'short_description'
-        class MockModelAdmin(object):
+        class MockModelAdmin:
             def my_property(self):
                 return "this if from property"
             my_property.short_description = 'property short description'
@@ -302,31 +316,6 @@ class UtilsTests(TestCase):
             label_for_field('guest', Event, return_attr=True),
             ('awesome guest', None),
         )
-
-    def test_logentry_unicode(self):
-        """
-        Regression test for #15661
-        """
-        log_entry = admin.models.LogEntry()
-
-        log_entry.action_flag = admin.models.ADDITION
-        self.assertTrue(
-            six.text_type(log_entry).startswith('Added ')
-        )
-
-        log_entry.action_flag = admin.models.CHANGE
-        self.assertTrue(
-            six.text_type(log_entry).startswith('Changed ')
-        )
-
-        log_entry.action_flag = admin.models.DELETION
-        self.assertTrue(
-            six.text_type(log_entry).startswith('Deleted ')
-        )
-
-        # Make sure custom action_flags works
-        log_entry.action_flag = 4
-        self.assertEqual(six.text_type(log_entry), 'LogEntry Object')
 
     def test_safestring_in_field_label(self):
         # safestring should not be escaped
